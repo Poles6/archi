@@ -1389,6 +1389,13 @@ class ChatWrapper:
                 )
                 event_queue.put(_SENTINEL)
 
+        # Yield arm labels early so the frontend can display variant names
+        yield {
+            "type": "ab_arms",
+            "arm_a_name": arm_a_variant.name,
+            "arm_b_name": arm_b_variant.name,
+        }
+
         # Start both arms in parallel threads
         thread_a = threading.Thread(target=_stream_arm, args=(archi_a, "a"), daemon=True)
         thread_b = threading.Thread(target=_stream_arm, args=(archi_b, "b"), daemon=True)

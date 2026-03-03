@@ -197,15 +197,21 @@ def load_ab_pool(config: Dict[str, Any]) -> Optional[ABPool]:
     """
     Load the A/B pool from the full config dict.
 
-    Looks for ab_testing config at:
+    Looks for ab_testing config at (in priority order):
       - config["ab_testing"]  (top-level)
-      - config["services"]["ab_testing"]  (under services)
+      - config["services"]["chat_app"]["ab_testing"]  (preferred)
+      - config["services"]["ab_testing"]  (legacy)
 
     Returns None if ab_testing is not configured or disabled.
     """
     ab_config = config.get("ab_testing")
     if not ab_config or not isinstance(ab_config, dict):
-        # Try under services (the key lives there in deployed configs)
+        # Try under services.chat_app.ab_testing (preferred location)
+        services = config.get("services") or {}
+        chat_app = services.get("chat_app") or {}
+        ab_config = chat_app.get("ab_testing")
+    if not ab_config or not isinstance(ab_config, dict):
+        # Legacy: try services.ab_testing
         services = config.get("services") or {}
         ab_config = services.get("ab_testing")
     if not ab_config or not isinstance(ab_config, dict):

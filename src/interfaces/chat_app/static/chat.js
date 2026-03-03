@@ -2346,13 +2346,14 @@ const UI = {
 
     const showTrace = Chat.state.traceVerboseMode !== 'minimal';
     const traceIconSvg = `<svg class="trace-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
+    const traceCollapsed = Chat.state.traceVerboseMode === 'normal';
     const traceHtml = (id) => showTrace ? `
-          <div class="trace-container ab-trace-container" data-message-id="${id}">
+          <div class="trace-container ab-trace-container${traceCollapsed ? ' collapsed' : ''}" data-message-id="${id}">
             <div class="trace-header" data-trace-toggle="${id}">
               ${traceIconSvg}
               <span class="trace-label">Agent Activity</span>
               <span class="trace-timer" data-start="${Date.now()}">0.0s</span>
-              <span class="toggle-icon">▼</span>
+              <span class="toggle-icon">${traceCollapsed ? '&#9654;' : '&#9660;'}</span>
             </div>
             <div class="trace-content">
               <div class="step-timeline"></div>
@@ -2367,9 +2368,21 @@ const UI = {
               <div class="message-avatar"><img class="assistant-logo" src="/static/images/archi-logo.png" alt="archi logo"></div>
               <span class="message-sender">archi</span>
               <span class="message-label ab-arm-label">${label}</span>
+              <span class="ab-arm-variant-name" data-arm-id="${id}"></span>
             </div>
             ${traceHtml(id)}
             <div class="message-content"></div>
+            <div class="message-actions">
+              <button class="feedback-btn feedback-like" onclick="UI.handleFeedback(this, 'like')" aria-label="Helpful" title="Helpful">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+              </button>
+              <button class="feedback-btn feedback-dislike" onclick="UI.handleFeedback(this, 'dislike')" aria-label="Not helpful" title="Not helpful">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>
+              </button>
+              <button class="feedback-btn feedback-comment" onclick="UI.handleFeedback(this, 'comment')" aria-label="Add comment" title="Add comment">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              </button>
+            </div>
           </div>
         </div>`;
 
@@ -2387,7 +2400,19 @@ const UI = {
         el.addEventListener('click', () => UI.toggleTraceExpanded(el.dataset.traceToggle));
       }
     });
+    // Start timers for both A/B arms
+    if (showTrace) {
+      this.startTraceTimer(msgIdA);
+      this.startTraceTimer(msgIdB);
+    }
     this.scrollToBottom();
+  },
+
+  updateABVariantLabel(armId, variantName) {
+    const labelEl = document.querySelector(`.ab-arm-variant-name[data-arm-id="${armId}"]`);
+    if (labelEl && variantName) {
+      labelEl.textContent = variantName;
+    }
   },
 
   updateABResponse(responseId, html, streaming = false) {
@@ -2539,7 +2564,17 @@ const UI = {
       </div>`;
 
     inner.insertAdjacentHTML('afterbegin', traceHtml);
-    
+
+    // Start collapsed in normal mode (user can expand on demand)
+    if (Chat.state.traceVerboseMode === 'normal') {
+      const tc = inner.querySelector('.trace-container');
+      if (tc) {
+        tc.classList.add('collapsed');
+        const ti = tc.querySelector('.toggle-icon');
+        if (ti) ti.innerHTML = '&#9654;';
+      }
+    }
+
     // Start elapsed timer
     this.startTraceTimer(messageId);
   },
@@ -3843,6 +3878,13 @@ const Chat = {
           return;
         }
 
+        if (event.type === 'ab_arms') {
+          // Early metadata: update arm labels with variant names
+          UI.updateABVariantLabel(msgIdA, event.arm_a_name);
+          UI.updateABVariantLabel(msgIdB, event.arm_b_name);
+          continue;
+        }
+
         if (event.type === 'ab_meta') {
           abMeta = event;
           // Update conversation_id if server assigned one
@@ -3877,6 +3919,12 @@ const Chat = {
       // Finalize both arms (remove streaming cursor)
       UI.updateABResponse(msgIdA, Markdown.render(armTexts.a), false);
       UI.updateABResponse(msgIdB, Markdown.render(armTexts.b), false);
+
+      // Stop trace timers and finalize trace containers
+      UI.stopTraceTimer(msgIdA);
+      UI.stopTraceTimer(msgIdB);
+      UI.finalizeTrace(msgIdA);
+      UI.finalizeTrace(msgIdB);
 
       // Set up voting if we got a comparison_id
       if (abMeta?.comparison_id) {
